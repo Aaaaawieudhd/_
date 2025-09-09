@@ -1,0 +1,74 @@
+name: Persistent RDP with OpenVPN (Auto IP, No Save)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 1440
+
+    steps:
+      # تثبيت OpenVPN
+      - name: Install OpenVPN
+        run: choco install openvpn -y
+
+      # الاتصال بالـ OpenVPN
+      - name: Connect to OpenVPN
+        run: |
+          $ovpnConfig = "${{ secrets.OPENVPN_CONFIG }}"
+          $ovpnPath = "$env:ProgramData\OpenVPN\config\client.ovpn"
+
+          if (-not (Test-Path $ovpnPath)) {
+              New-Item -ItemType File -Path $ovpnPath -Force
+              Set-Content -Path $ovpnPath -Value $ovpnConfig -Encoding UTF8
+          }
+
+          $vpnRunning = Get-Process openvpn -ErrorAction SilentlyContinue
+          if (-not $vpnRunning) {
+              Start-Process -FilePath "C:\Program Files\OpenVPN\bin\openvpn.exe" `
+                -ArgumentList "--config `"$ovpnPath`"" `
+                -WindowStyle Hidden
+              Start-Sleep -Seconds 25
+          }
+
+      # تفعيل RDP وحساب دائم
+      - name: Enable RDP and Persistent Account
+        run: |
+          $username = "PersistentRDP"
+          $password = "admin@123"
+
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\' -name "fDenyTSConnections" -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+
+          if (-not (Get-LocalUser -Name $username -ErrorAction SilentlyContinue)) {
+              New-LocalUser -Name $username -Password (ConvertTo-SecureString $password -AsPlainText -Force) -AccountNeverExpires
+              Add-LocalGroupMember -Group "Administrators" -Member $username
+              Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username
+          }
+
+      # جلب IP الخاص بالـ VPN تلقائيًا
+      - name: Get VPN IP
+        run: |
+          $vpnIP = (Get-NetIPAddress | Where-Object {$_.InterfaceAlias -like "*TAP*"} | Select-Object -First 1).IPAddress
+          if (-not $vpnIP) {
+              # fallback إذا لم يتم العثور على TAP adapter
+              $vpnIP = (Invoke-WebRequest -Uri "http://ifconfig.me/ip").Content.Trim()
+          }
+
+          Write-Host "============================="
+          Write-Host "✅ RDP & VPN Info"
+          Write-Host "Address (VPN IP): $vpnIP"
+          Write-Host "Username: PersistentRDP"
+          Write-Host "Password: admin@123"
+          Write-Host "============================="
+
+      # الحفاظ على الجلسة نشطة
+      - name: Keep Workflow Alive
+        run: |
+          Write-Host "💻 RDP & VPN are running. Keeping session alive..."
+          while ($true) {
+              Start-Sleep -Seconds 300
+          }
