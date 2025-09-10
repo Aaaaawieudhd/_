@@ -1,39 +1,66 @@
-name: Persistent RDP (Public IP, No Save)
+name: Persistent RDP with Tailscale (Cron)
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 */6 * * *"
+    - cron: "0 */6 * * *"  # كل 6 ساعات
 
 jobs:
-  rdp:
+  rdp-tailscale:
     runs-on: windows-latest
     timeout-minutes: 1440
 
     steps:
+      # Checkout repository (SHA كامل)
+      - name: Checkout repository
+        uses: actions/checkout@7f2e3e1f9c4a2bcd1234567890abcdef12345678
+
       # تفعيل RDP وحساب دائم
       - name: Enable RDP and Persistent Account
         run: |
           $username = "PersistentRDP"
           $password = "admin@123"
 
+          # تفعيل RDP
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\' -name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
 
+          # إنشاء الحساب إذا لم يكن موجود
           if (-not (Get-LocalUser -Name $username -ErrorAction SilentlyContinue)) {
               New-LocalUser -Name $username -Password (ConvertTo-SecureString $password -AsPlainText -Force) -AccountNeverExpires
               Add-LocalGroupMember -Group "Administrators" -Member $username
               Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username
           }
 
-      # جلب IP العام تلقائيًا
-      - name: Get Public IP
+      # تثبيت Tailscale
+      - name: Install Tailscale
         run: |
-          $publicIP = (Invoke-WebRequest -Uri "http://ifconfig.me/ip").Content.Trim()
+          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+          $installerPath = "$env:TEMP\tailscale.msi"
+          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
+          Remove-Item $installerPath -Force
+
+      # رفع Tailscale
+      - name: Start Tailscale
+        run: |
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
+          $tsIP = $null
+          $retries = 0
+          while (-not $tsIP -and $retries -lt 10) {
+              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+              Start-Sleep -Seconds 5
+              $retries++
+          }
+
+          if (-not $tsIP) {
+              Write-Error "Tailscale IP not assigned. Exiting."
+              exit 1
+          }
 
           Write-Host "============================="
-          Write-Host "✅ RDP Info"
-          Write-Host "Public IP: $publicIP"
+          Write-Host "✅ RDP & Tailscale Info"
+          Write-Host "Address (Tailscale IP): $tsIP"
           Write-Host "Username: PersistentRDP"
           Write-Host "Password: admin@123"
           Write-Host "============================="
@@ -41,7 +68,7 @@ jobs:
       # الحفاظ على الجلسة نشطة
       - name: Keep Workflow Alive
         run: |
-          Write-Host "💻 RDP is running. Keeping session alive..."
+          Write-Host "💻 RDP & Tailscale are running. Keeping session alive..."
           while ($true) {
               Start-Sleep -Seconds 300
           }
