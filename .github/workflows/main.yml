@@ -11,10 +11,6 @@ jobs:
     timeout-minutes: 1440
 
     steps:
-      # Checkout repository (SHA كامل)
-      - name: Checkout repository
-        uses: actions/checkout@7f2e3e1f9c4a2bcd1234567890abcdef12345678
-
       # تفعيل RDP وحساب دائم
       - name: Enable RDP and Persistent Account
         run: |
@@ -41,7 +37,7 @@ jobs:
           Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
           Remove-Item $installerPath -Force
 
-      # رفع Tailscale
+      # تشغيل Tailscale والحصول على IP
       - name: Start Tailscale
         run: |
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
