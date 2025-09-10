@@ -1,4 +1,4 @@
-name: Persistent RDP with OpenVPN (Auto IP, No Save)
+name: Persistent RDP (Public IP, No Save)
 
 on:
   workflow_dispatch:
@@ -6,34 +6,11 @@ on:
     - cron: "0 */6 * * *"
 
 jobs:
-  build:
+  rdp:
     runs-on: windows-latest
     timeout-minutes: 1440
 
     steps:
-      # تثبيت OpenVPN
-      - name: Install OpenVPN
-        run: choco install openvpn -y
-
-      # الاتصال بالـ OpenVPN
-      - name: Connect to OpenVPN
-        run: |
-          $ovpnConfig = "${{ secrets.OPENVPN_CONFIG }}"
-          $ovpnPath = "$env:ProgramData\OpenVPN\config\client.ovpn"
-
-          if (-not (Test-Path $ovpnPath)) {
-              New-Item -ItemType File -Path $ovpnPath -Force
-              Set-Content -Path $ovpnPath -Value $ovpnConfig -Encoding UTF8
-          }
-
-          $vpnRunning = Get-Process openvpn -ErrorAction SilentlyContinue
-          if (-not $vpnRunning) {
-              Start-Process -FilePath "C:\Program Files\OpenVPN\bin\openvpn.exe" `
-                -ArgumentList "--config `"$ovpnPath`"" `
-                -WindowStyle Hidden
-              Start-Sleep -Seconds 25
-          }
-
       # تفعيل RDP وحساب دائم
       - name: Enable RDP and Persistent Account
         run: |
@@ -49,18 +26,14 @@ jobs:
               Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username
           }
 
-      # جلب IP الخاص بالـ VPN تلقائيًا
-      - name: Get VPN IP
+      # جلب IP العام تلقائيًا
+      - name: Get Public IP
         run: |
-          $vpnIP = (Get-NetIPAddress | Where-Object {$_.InterfaceAlias -like "*TAP*"} | Select-Object -First 1).IPAddress
-          if (-not $vpnIP) {
-              # fallback إذا لم يتم العثور على TAP adapter
-              $vpnIP = (Invoke-WebRequest -Uri "http://ifconfig.me/ip").Content.Trim()
-          }
+          $publicIP = (Invoke-WebRequest -Uri "http://ifconfig.me/ip").Content.Trim()
 
           Write-Host "============================="
-          Write-Host "✅ RDP & VPN Info"
-          Write-Host "Address (VPN IP): $vpnIP"
+          Write-Host "✅ RDP Info"
+          Write-Host "Public IP: $publicIP"
           Write-Host "Username: PersistentRDP"
           Write-Host "Password: admin@123"
           Write-Host "============================="
@@ -68,7 +41,7 @@ jobs:
       # الحفاظ على الجلسة نشطة
       - name: Keep Workflow Alive
         run: |
-          Write-Host "💻 RDP & VPN are running. Keeping session alive..."
+          Write-Host "💻 RDP is running. Keeping session alive..."
           while ($true) {
               Start-Sleep -Seconds 300
           }
